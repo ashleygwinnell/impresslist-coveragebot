@@ -1,0 +1,17 @@
+{
+  "name": "impresslist-coveragebot",
+  "version": "0.1.0",
+  "description": "Coverage Bot for Discord",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Ashley Gwinnell / Force Of Habit",
+  "license": "ISC",
+  "devDependencies": {
+    "axios": "^0.19.2",
+    "body-parser": "^1.19.0",
+    "eris": "^0.12.0",
+    "express": "^4.17.1"
+  }
+}
