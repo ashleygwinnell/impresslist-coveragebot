@@ -1,5 +1,7 @@
 # Coverage Bot
 
+No open source licence. Looking into which to pick...
+
 # Setup
 - Create app on https://discordapp.com/developers/applications/ and copy client ids into config.json
 - Create AWS account to use free 'micro' EC2 instance: https://www.youtube.com/watch?v=376V-NB3nf0
