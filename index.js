@@ -1,6 +1,9 @@
+const schedule = require('node-schedule');
+
 const axios = require('axios').default;
 const {
 	DISCORD_APP_CLIENT_ID,
+	DISCORD_BOT_MASTER_SERVER_ID,
 	DISCORD_BOT_TOKEN,
 	DISCORD_BOT_USERNAME,
 	IMPRESSLIST_URL,
@@ -18,11 +21,12 @@ const BOT_COPYRIGHT = "© Coverage Bot ~ made with love by Force Of Habit!";
 const BOT_DESCRIPTION = `A bot that tracks mentions of your game & keywords across the internet.`;
 const BOT_FEATURES = `**Coverage Tracking**
 • Looks at thousands of YouTube channels, Twitch streamers and traditional web/game publications, and posts your coverage to your community.
-`;/*
-• Fully browsable Coverage results - view alphabetically, by most recent or by various search terms.
 
 ** Analytics & Reporting **
 • Provides stats on your coverage - views, likes, comments - where possible.
+`;
+/*
+• Fully browsable Coverage results - view alphabetically, by most recent or by various search terms.
 • Provides a daily/weekly/monthly Coverage report.
 
 ** Community & Engagement **
@@ -38,11 +42,11 @@ function apiGetRequest(endpoint, server, data = {}) {
 		dataStr += "&" + encodeURIComponent(key) + "=" + encodeURIComponent(data[key]);
 	}
 	let url = IMPRESSLIST_URL + "/api.php?endpoint=" + endpoint + dataStr;
-	console.log(url);
+	//console.log(url);
 
 	return new Promise((resolve, reject) => {
 		axios(url).then((response)=>{
-			console.log(response);
+			//console.log(response);
 			resolve(response);
 		})
 	});
@@ -53,19 +57,19 @@ function apiGetRequest(endpoint, server, data = {}) {
 // Core functionality (implemented)
 // cb!latest						what coverage you've had most recently
 // cb!random 						random piece of coverage
-// cb!today							stats on how much coverage you've had in last 24 hours --- x new videos : x minutes, x views/favorites/comments/etc., x new articles
-// cb!week 							stats on how much coverage you've had this week
-// cb!month 						stats on how much coverage you've had this month
-// cb!all 							stats on how much coverage you've had all time.
+// cb!stats today					stats on how much coverage you've had in last 24 hours --- x new videos : x minutes, x views/favorites/comments/etc., x new articles
+// cb!stats week 					stats on how much coverage you've had this week
+// cb!stats month					stats on how much coverage you've had this month
+// cb!stats all						stats on how much coverage you've had all time.
 // cb!about 						who made it / how to support it.
 // cb!help							list commands
-
 // cb!search {terms} 				search pieces of coverage by string
-// cb!search {num_results} {terms} 	search pieces of coverage by string
+// cb!search {limit} {terms} 		search pieces of coverage by string
+
+// cb!submit {link}					submit a piece of coverage. (should be approved within 24 hrs)
 
 // Core functionality (todo)
 // cb!configure 					start form of inputting game details, etc.
-// cb!submit {link}					submit a piece of coverage. (should be approved within 24 hrs)
 // cb!report {link}					report a piece of coverage. (should be deleted within 24 hrs) e.g. https://discordapp.com/channels/303545432724996106/556878611639173131/706557496524931155
 // cb!game 							info about the game.
 // cb!presskit 						link to press kit
@@ -76,7 +80,6 @@ function apiGetRequest(endpoint, server, data = {}) {
 // cb!supporters 					list of cool discord users supporting coverage bot. get in the list by patreonining.
 // cb!join							join force of habit's server?
 
-
 // Future functionality
 // cb!best {views, likes, subscribers, minutes}
 // cb!alphabetical 					alphabetical list of coverage (10 per page)
@@ -85,10 +88,6 @@ function apiGetRequest(endpoint, server, data = {}) {
 // cb!latest {page}					list of coverage by most recent -  next page (10 per page) (/list page)
 // cb!blacklist {terms}
 // cb!whatsnew 						show version history
-
-
-// youtuber_coverage_potential
-// id, game, watchedgame, url, title, timestamp, removed
 
 let genTitleMessage = (title = "Most Recent Coverage") => {
 	return {
@@ -159,6 +158,16 @@ let genError = (message) => {
 		}
 	};
 }
+let genSuccess = (message) => {
+	return {
+		embed: {
+			color: BOT_COLOR,
+			footer: {
+				text: message
+			}
+		}
+	};
+}
 
 let startStatsRequest = (msg, title, guildId, duration) => {
 	return new Promise((resolve, reject) => {
@@ -166,8 +175,12 @@ let startStatsRequest = (msg, title, guildId, duration) => {
 				duration: duration
 			})
 				.then((results)=>{
-					if (!results.data || !results.data.success) {
-						reject();
+					if (!results.data) {
+						reject("Unknown reason.");
+						return;
+					}
+					else if (!results.data.success) {
+						reject(results.data.message);
 						return;
 					}
 					try {
@@ -194,9 +207,11 @@ const commandForName = {};
 const helpStr = "`"+BOT_PREFIX+'help` for my commands!';
 commandForName['about'] = {
 	botOwnerOnly: false,
+	botModeratorOnly: false,
 	description: "Show 'about' page.",
 	paramsOptions: [],
-	execute: (msg, args) => {
+	visible: true,
+	execute: (server, msg, args) => {
 		return msg.channel.createMessage({
 			embed: {
 				title: "About Coverage Bot",
@@ -243,15 +258,21 @@ commandForName['about'] = {
 
 commandForName['latest'] = {
 	botOwnerOnly: false,
+	botModeratorOnly: false,
 	description: "Show latest piece of coverage.",
 	paramsOptions: [],
-	execute: async (msg, args) => {
+	visible: true,
+	execute: async (server, msg, args) => {
 
 		return new Promise((resolve, reject) => {
 			apiGetRequest("/bot/latest", msg.channel.guild.id)
 				.then(async (results)=>{
-					if (!results.data || !results.data.success) {
-						reject();
+					if (!results.data) {
+						reject("Unknown reason.");
+						return;
+					}
+					else if (!results.data.success) {
+						reject(results.data.message);
 						return;
 					}
 					//console.log(results);
@@ -260,7 +281,7 @@ commandForName['latest'] = {
 						await msg.channel.createMessage(genTitleMessage("Most Recent Coverage"))
 						for(let index in results.data.coverage) {
 							let item = results.data.coverage[index];
-							await genCoverageItemMessage(item);
+							await genCoverageItemMessage(msg.channel, item);
 						}
 						await msg.channel.createMessage(genFooter());
 						resolve();
@@ -280,24 +301,31 @@ commandForName['latest'] = {
 
 commandForName['random'] = {
 	botOwnerOnly: false,
+	botModeratorOnly: false,
 	description: "Get random piece of coverage.",
 	paramsOptions: [],
-	execute: (msg, args) => {
+	visible: true,
+	execute: (server, msg, args) => {
 		return new Promise((resolve, reject) => {
 			apiGetRequest("/bot/random", msg.channel.guild.id)
 				.then(async(results)=>{
-					console.log("results", results);
+					//console.log("results", results);
 
-					if (!results.data || !results.data.success) {
-						reject();
+					if (!results.data) {
+						reject("Unknown reason.");
+						return;
+					}
+					else if (!results.data.success) {
+						reject(results.data.message);
 						return;
 					}
 
 					try {
 						await msg.channel.createMessage(genTitleMessage("Random Coverage"))
 						for(let index in results.data.coverage) {
+							console.log(index);
 							let item = results.data.coverage[index];
-							await genCoverageItemMessage(item);
+							await genCoverageItemMessage(msg.channel, item);
 						}
 						await msg.channel.createMessage(genFooter());
 						resolve();
@@ -318,6 +346,7 @@ commandForName['random'] = {
 
 commandForName['stats'] = {
 	botOwnerOnly: false,
+	botModeratorOnly: false,
 	description: "Show Coverage Stats.",
 	paramsOptions: [
 		["today"],
@@ -326,7 +355,8 @@ commandForName['stats'] = {
 		["year"],
 		["all"],
 	],
-	execute: async (msg, args) => {
+	visible: true,
+	execute: async (server, msg, args) => {
 		let duration = "all";
 		let durationDesc = "All time";
 		if (args.length == 1) {
@@ -340,13 +370,15 @@ commandForName['stats'] = {
 };
 commandForName['search'] = {
 	botOwnerOnly: false,
+	botModeratorOnly: false,
 	description: "Search for piece of coverage.",
 	paramsOptions: [
 		["{query}"],
 		["{limit}", "{query}"],
 		["{limit}", "{page}", "{query}"]
 	],
-	execute: async (msg, args) => {
+	visible: true,
+	execute: async (server, msg, args) => {
 
 		let data;
 		if (args.length == 1) {
@@ -372,8 +404,12 @@ commandForName['search'] = {
 		return new Promise((resolve, reject) => {
 			apiGetRequest("/bot/search", msg.channel.guild.id, data)
 				.then(async (results)=>{
-					if (!results.data || !results.data.success) {
-						reject();
+					if (!results.data) {
+						reject("Unknown reason.");
+						return;
+					}
+					else if (!results.data.success) {
+						reject(results.data.message);
 						return;
 					}
 
@@ -399,18 +435,67 @@ commandForName['search'] = {
 		});
 	}
 };
+
+commandForName['submit'] = {
+	botOwnerOnly: false,
+	botModeratorOnly: false,
+	description: "Submit your coverage!",
+	paramsOptions: [
+		["{url}"]
+	],
+	visible: true,
+	execute: async (server, msg, args) => {
+		if (args.length !== 1) {
+			return msg.channel.createMessage(genError("Invalid url."));
+		}
+		let url = args[0];
+		return new Promise((resolve, reject) => {
+			apiGetRequest("/bot/submit", msg.channel.guild.id, {
+				url: url
+			})
+				.then((results)=>{
+					//console.log("results", results);
+
+					if (!results.data) {
+						reject("Unknown reason.");
+						return;
+					}
+					else if (!results.data.success) {
+						reject(results.data.message);
+						return;
+					}
+
+					msg.channel.createMessage(genSuccess("Thank you for your submission!"))
+						.then((d)=>{
+							resolve(d);
+						}).catch((e)=>{
+							reject(e);
+						})
+				})
+				.catch((e) => {
+					reject(e);
+				});
+		});
+	}
+};
 commandForName['games'] = {
 	botOwnerOnly: false,
+	botModeratorOnly: false,
 	description: "Show teams/games using Coverage Bot.",
 	paramsOptions: [],
-	execute: async (msg, args) => {
+	visible: true,
+	execute: async (server, msg, args) => {
 		return new Promise((resolve, reject) => {
 			apiGetRequest("/bot/games", msg.channel.guild.id)
 				.then((results)=>{
-					console.log("results", results);
+					//console.log("results", results);
 
-					if (!results.data || !results.data.success) {
-						reject();
+					if (!results.data) {
+						reject("Unknown reason.");
+						return;
+					}
+					else if (!results.data.success) {
+						reject(results.data.message);
 						return;
 					}
 
@@ -461,13 +546,21 @@ commandForName['games'] = {
 
 commandForName['help'] = {
 	botOwnerOnly: false,
+	botModeratorOnly: false,
 	description: "Show this command list.",
 	paramsOptions: [],
-	execute: (msg, args) => {
+	visible: true,
+	execute: (server, msg, args) => {
 		let fields = [];
 		for (let command in commandForName) {
 			let commandStart = "`" + BOT_PREFIX + command + "`";
 
+			if (!commandForName[command].visible) {
+				continue;
+			}
+			if (commandForName[command].botModeratorOnly && !isMessageFromModerator(server, msg)) {
+				continue;
+			}
 			if (commandForName[command].paramsOptions.length > 0) {
 				let orders = "";
 				for (let paramOption in commandForName[command].paramsOptions) {
@@ -497,6 +590,165 @@ commandForName['help'] = {
 				footer: genFooter().embed.footer
 			}
 		});
+	}
+};
+
+let approveOrRejectFunc = (server, type, args) => {
+	if (type != "approve" && type != "reject") {
+		return new Promise((resolve, reject) => {
+			reject("Invalid type: " + type);
+		});
+	}
+	let useId = -1;
+	if (server.lookout.current !== null) {
+		useId = server.lookout.current.id;
+	}
+	else {
+		// If there's not one "current" then we need to receive an id for which wwe're approving!
+		useId = args[0];
+	}
+
+	if (useId > 0) {
+		// approve it
+		return new Promise((resolve, reject) => {
+			apiGetRequest("/bot/" + type, server.id, { id: useId })
+				.then(async (results)=>{
+					console.log("results", results);
+
+					if (!results.data) {
+						reject("Unknown reason.");
+						return;
+					}
+					else if (!results.data.success) {
+						reject(results.data.message);
+						return;
+					}
+
+					await server.modChannel.createMessage("Done.");
+					server.lookout.current = null;
+
+					if (server.lookout.queue.length == 0) {
+						await server.modChannel.createMessage("No more potentials.");
+					}
+					else {
+						advanceLookoutQueue(server)
+							.then(() => {
+								resolve()
+							})
+							.catch((e)=>{
+								reject(e);
+							});
+					}
+				});
+		});
+	}
+	return new Promise((resolve, reject) => {
+		reject("Invalid id");
+	});
+
+}
+
+commandForName['approve'] = {
+	botOwnerOnly: false,
+	botModeratorOnly: true,
+	description: "(MOD ONLY) Approve submitted coverage.",
+	paramsOptions: [
+		//[]//,
+		//["{id}"]
+	],
+	visible: false,
+	execute: (server, msg, args) => {
+		if (server.lookout.current == null) {
+			return server.modChannel.createMessage(genError("No coverage waiting approval. Try running `" + BOT_PREFIX + "lookout` again."))
+		}
+		return approveOrRejectFunc(server, "approve", args);
+	}
+};
+commandForName['reject'] = {
+	botOwnerOnly: false,
+	botModeratorOnly: true,
+	description: "(MOD ONLY) Reject potential coverage.",
+	paramsOptions: [
+		//[]//,
+		//["{id}"]
+	],
+	visible: false,
+	execute: (server, msg, args) => {
+		if (server.lookout.current == null) {
+			return server.modChannel.createMessage(genError("No coverage waiting approval. Try running `" + BOT_PREFIX + "lookout` again."))
+		}
+		return approveOrRejectFunc(server, "reject", args);
+	}
+};
+
+let lookoutFunc = (server, resetQueue = true) => {
+	return new Promise((resolve, reject) => {
+
+		apiGetRequest("/bot/potentials", server.id)
+			.then((results)=>{
+				console.log("results", results);
+
+				if (!results.data) {
+					reject("Unknown reason.");
+					return;
+				}
+				else if (!results.data.success) {
+					reject(results.data.message);
+					return;
+				}
+
+				if (resetQueue) {
+					// clear current state and reset it into the queue.
+					if (server.lookout.current != null) {
+						server.lookout.queue = [
+							server.lookout.current,
+							...server.lookout.queue
+						];
+						server.lookout.current = null;
+					}
+
+					if (results.data.potentials.length == 0) {
+						server.modChannel.createMessage("No potentials.");
+						resolve();
+						return;
+					}
+				}
+
+				let existsIds = [];
+				for (let i = 0; i < server.lookout.queue.length; i++) {
+					existsIds.push(server.lookout.queue[i].id);
+				}
+
+				// add new coverage to queue.
+				for (let i = 0; i < results.data.potentials.length; i++) {
+					const p = results.data.potentials[i];
+					if (existsIds.indexOf(p.id) == -1) {
+						server.lookout.queue.push(p);
+					}
+				}
+				advanceLookoutQueue(server)
+					.then(()=>{
+						resolve();
+					})
+					.catch((e) => {
+						reject(e);
+					})
+
+			});
+	});
+};
+
+commandForName['lookout'] = {
+	botOwnerOnly: false,
+	botModeratorOnly: true,
+	description: "(MOD ONLY) Review potential coverage.",
+	paramsOptions: [
+		//[]
+	],
+	visible: true,
+	execute: async (server, msg, args) => {
+		await server.modChannel.createMessage("Coming right up!");
+		return lookoutFunc(server, true);
 	}
 };
 
@@ -534,6 +786,14 @@ bot.on('ready', () => {
 	console.log('Connected and ready to proceed.');
 });
 
+const allServers = {
+
+};
+
+let isMessageFromModerator = (server, msg) => {
+	return msg.member.roles.indexOf(server.modRole.id) >= 0;
+}
+
 // Every time a message is sent anywhere the bot is present,
 // this event will fire and we will check if the bot was mentioned.
 // If it was, the bot will attempt to respond with "Present".
@@ -549,8 +809,8 @@ bot.on('messageCreate', async (msg) => {
 
 	// Give "about" info in any private messages.
 	if (!msg.channel.guild) {
-		await commandForName['about'].execute(msg, []);
-		//await commandForName['games'].execute(msg, []);
+		await commandForName['about'].execute(null, msg, []);
+		//await commandForName['games'].execute(null, msg, []);
 		//await msg.channel.createMessage(helpStr + "\nMy commands are only valid inside Discord servers though!");
 		//await msg.channel.createMessage("");
 		return;
@@ -572,24 +832,32 @@ bot.on('messageCreate', async (msg) => {
 	};
 
 	let everyoneRole = msg.channel.guild.roles.find((role) => { return role.name == "@everyone"; });
+	let botRole = msg.channel.guild.roles.find((role) => { return role.name == "Coverage Bot"; });
 	let foundModRole = msg.channel.guild.roles.find((role) => { return role.name == modRoleData.name});
 	if (foundModRole == null) {
-		console.log('creating coverage bot moderation role');
-		console.log('modRoleData', modRoleData);
+		console.log('Creating coverage bot moderation role');
+		//console.log('modRoleData', modRoleData);
 		let role;
 		try {
 			role = await bot.createRole(msg.channel.guild.id, modRoleData, "Coverage Bot - moderators role - people who can report submit new coverage and report false coverage!")
 		} catch (e) {
 			//console.warn(e);
 		}
-		console.log('role', role);
+		//console.log('role', role);
 		foundModRole = role;
 	}
 	// assign role to owner id
-	try {
-		await bot.addGuildMemberRole(msg.channel.guild.id, foundModRole.guild.ownerID, foundModRole.id, "Coverage Bot - moderators role - give owner the role.");
-	} catch (e) {
-		console.warn(e);
+	if (foundModRole !== null) {
+		try {
+			//console.log('foundModRole', foundModRole);
+			//console.log('msg.channel', msg.channel);
+			console.log("Adding role to owner.");
+			await bot.addGuildMemberRole(msg.channel.guild.id, foundModRole.guild.ownerID, foundModRole.id, "Coverage Bot - moderators role - give owner the role.");
+		} catch (e) {
+			//console.warn(e);
+		}
+	} else {
+		console.log("could not get/create mod role in ", msg.channel.guild.name, foundModRole)
 	}
 
 	//console.log("roles", msg.channel.guild.roles);
@@ -597,7 +865,7 @@ bot.on('messageCreate', async (msg) => {
 	let internalModChannel = {
 		name: "coverage-moderation",
 		options: {
-			topic: "Coverage Bot - Moderation",
+			topic: "Coverage Bot - Moderation - use `cb!help` for commands.",
 			reason: "Coverage Bot - moderation channel",
 			permissionOverwrites: [
 				new eris.PermissionOverwrite({
@@ -609,20 +877,52 @@ bot.on('messageCreate', async (msg) => {
 				new eris.PermissionOverwrite({
 					id: foundModRole.id,
 					type: "role",
-					allow: eris.Constants.Permissions.readMessages & eris.Constants.Permissions.sendMessages &
-							eris.Constants.Permissions.manageMessages & eris.Constants.Permissions.readMessageHistory,
+					allow: eris.Constants.Permissions.readMessages | eris.Constants.Permissions.sendMessages |
+							eris.Constants.Permissions.embedLinks |
+							eris.Constants.Permissions.manageMessages | eris.Constants.Permissions.readMessageHistory,
 					deny: 0
 				})
 			]
 		}
 	}
+	if (botRole !== null) {
+		internalModChannel.options.permissionOverwrites.push(
+			new eris.PermissionOverwrite({
+				id: botRole.id,
+				type: "role",
+				allow: eris.Constants.Permissions.readMessages | eris.Constants.Permissions.sendMessages |
+						eris.Constants.Permissions.embedLinks |
+						eris.Constants.Permissions.manageMessages | eris.Constants.Permissions.readMessageHistory,
+				deny: 0
+			})
+		);
+	}
 	let foundModChannel = msg.channel.guild.channels.find((channel) => { return channel.name == internalModChannel.name; })
 	if (!foundModChannel) {
-		let modChannel = await bot.createChannel(msg.channel.guild.id, internalModChannel.name, 0, internalModChannel.options);
+		foundModChannel = await bot.createChannel(msg.channel.guild.id, internalModChannel.name, 0, internalModChannel.options);
 		// console.log('modChannel', modChannel);
 	}
 
-
+	// esnsure server is in in memory bot server list.
+	let thisServer = null;
+	let allServerIds = Object.keys(allServers);
+	if (allServerIds.indexOf(msg.channel.guild.id) === -1) {
+		thisServer = {
+			id: msg.channel.guild.id,
+			ownerId: msg.channel.guild.ownerID,
+			modChannel: foundModChannel,
+			modRole: foundModRole,
+			lookout: {
+				current: null,
+				queue: []
+			}
+		};
+		allServers[thisServer.id] = thisServer;
+		console.log("added server", thisServer.id);
+	}
+	else {
+		thisServer = allServers[msg.channel.guild.id];
+	}
 
 
 	// Ignore any message that doesn't start with the correct prefix.
@@ -640,9 +940,22 @@ bot.on('messageCreate', async (msg) => {
 	if (!command) {
 		return;
 	}
+
+	//console.log( 'msg', msg );
+	//console.log( );
+	// msg.author.id
+	// msg.member.id
+	//
+	//msg.author.username
+	//msg.author.discriminator
+	if (command.botModeratorOnly && !isMessageFromModerator(thisServer, msg)) {
+		await msg.channel.createMessage(genError("Only Coverage Bot Moderators (Role) can use this command. "));
+		return;
+	}
+
 	const args = parts.slice(1);
 	try {
-		await command.execute(msg, args)
+		await command.execute(thisServer, msg, args)
 	}
 	catch (err) {
 		// There are various reasons why sending a message may fail.
@@ -651,7 +964,7 @@ bot.on('messageCreate', async (msg) => {
 		// message (403 status).
 		console.warn('Failed to respond to mention.');
 		console.warn(err);
-		await msg.channel.createMessage(genError(""));
+		await msg.channel.createMessage(genError(err));
 
 	}
 });
@@ -661,3 +974,45 @@ bot.on('error', err => {
 });
 
 bot.connect();
+
+let advanceLookoutQueue = async (server) => {
+	if (server.lookout.current == null && server.lookout.queue.length > 0) {
+
+		let current = server.lookout.queue.shift();
+		let str = "";
+		str += "**Potential Coverage:**\n";
+		//str += "(Coverage should be original and not trailer re-posts, etc.)\n";
+		str += "**URL:** " + current.url + "\n\n";
+		str += "Reply with `cb!approve` or `cb!reject`.\n";
+
+		let message = await server.modChannel.createMessage(str);
+		server.lookout.current = current;
+		server.lookout.current.message = message;
+
+	}
+};
+
+// Lookout schedule
+const nineAMEveryDay = '0 9 * * *';
+const everyMinute = '* * * * *';
+const everyHour = '0 * * * *';
+const every5Secs = '*/12 * * * *';
+schedule.scheduleJob(nineAMEveryDay, async function() {
+	// behave like we just received a cb!lookout?
+	// for every server, pull /bot/potentials, add them to the queue (if they're not in there already!), and start the approve process.
+	let allServerIds = Object.keys(allServers);
+	for(let i = 0; i < allServerIds.length; i++) {
+		const server = allServers[allServerIds[i]];
+		lookoutFunc(server, true); // commandForName['lookout'].execute(server, null, []);
+	}
+});
+schedule.scheduleJob(everyHour, async function() {
+	// for every server, pull /bot/potentials and add them to the queue.
+	let allServerIds = Object.keys(allServers);
+	for(let i = 0; i < allServerIds.length; i++) {
+		const server = allServers[allServerIds[i]];
+		lookoutFunc(server, false); // await advanceLookoutQueue(server);
+	}
+});
+
+
